@@ -218,6 +218,3 @@ class VideoToAudio:
         main_progress_frame.destroy()
         messagebox.showinfo("Conversion complete", "All your files have been converted.")
         filedialog.Open(self.file_save_directory)
-
-
-app = VideoToAudio()
