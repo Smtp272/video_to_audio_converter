@@ -1,5 +1,5 @@
 import moviepy.editor as mp
-from tkinter import filedialog, Menu, Frame, END, scrolledtext, Toplevel, messagebox, HORIZONTAL, WORD, StringVar, LEFT
+from tkinter import filedialog, Menu, Frame, END, scrolledtext, Toplevel, messagebox, HORIZONTAL, WORD, StringVar
 from tkinter.ttk import Progressbar
 from customtkinter import CTkButton, CTkLabel, CTk
 from os import listdir
@@ -7,6 +7,7 @@ from os.path import isfile, join
 import os
 import ntpath
 import time
+import datetime
 from threading import Thread, Event
 from functions import calc_time
 
@@ -31,6 +32,9 @@ class VideoToAudio:
         self.conversion_list = []
         self.conversion_file_text = ""
         self.file_save_directory = None
+        self.completed = 0
+        self.incompleted = 0
+        self.duplicates = 0
 
         # Thread man
         self.event = Event()
@@ -58,10 +62,6 @@ class VideoToAudio:
         self.file_menu.add_command(label="New")
         self.file_menu.add_command(label="Exit", command=self.root.quit)
 
-        self.options_menu = Menu(self.main_menu)
-        self.main_menu.add_cascade(label="Options", menu=self.file_menu)
-        self.options_menu.add_command(label="New", command=None)
-
         # Home frame
         self.home_frame = Frame(self.root, bg=self.blue)
         self.home_frame.pack(fill="both")
@@ -82,7 +82,7 @@ class VideoToAudio:
                                           command=self._upload_folder)
         self.select_files_btn.grid(row=2, column=1)
 
-        self.clear_btn = CTkButton(self.home_frame, text="Clear Selection", command=self._clear_file_selection,
+        self.clear_btn = CTkButton(self.home_frame, text="Clear Selection", command=self._reset_variables,
                                    fg_color=self.grey)
         self.clear_btn.grid(row=3, column=0, columnspan=2)
 
@@ -91,16 +91,17 @@ class VideoToAudio:
         self.convert_btn.grid(row=4, column=0, columnspan=2, pady=10)
 
         self.files_textbox = scrolledtext.ScrolledText(self.home_frame, height=15, bg=self.grey,
-                                                       font=("Montserrat", 10), state='disabled', padx=30, pady=10)
+                                                       font=("Montserrat", 10), padx=30, pady=10)
         self.files_textbox.grid(column=0, row=5, columnspan=2, ipady=25)
 
         # PROGRESSBAR VARIABLES
-        self.percentage = StringVar()
+        self.finish_time = StringVar()
+        self.time_left = StringVar()
         self.current_file = StringVar()
         self.files_completed = StringVar()
 
         # mainloop
-        self._clear_file_selection()
+        self._reset_variables()
         self.root.mainloop()
 
     def _directory_popup(self):
@@ -130,7 +131,8 @@ class VideoToAudio:
         if files == "":
             return
         self.conversion_list = [i.name for i in files]
-        self._render_file_names()
+        self.file_save_directory = ntpath.dirname(self.conversion_list[0])
+        self._render_file_names(self.conversion_list)
 
     def _upload_folder(self):
 
@@ -146,41 +148,42 @@ class VideoToAudio:
             messagebox.showerror(
                 "Error", "No video files found in selected folder")
             return
-        self._render_file_names()
-
-    def _render_file_names(self):
-        """renders page content to bottom text box"""
-        self.file_save_directory = ntpath.dirname(self.conversion_list[0])
-        self.conversion_file_text = ""
-        for i in self.conversion_list:
-            self.conversion_file_text += f"• {ntpath.basename(i)}\n"
-        self._format_file_selection()
-
-    def _format_file_selection(self):
-        self.files_textbox.configure(state='normal')
-        self.files_textbox.delete(1.0, "end")
-        self.files_textbox.insert(END, self.conversion_file_text)
-        self.files_textbox.config(wrap=WORD)
-        self.files_textbox.configure(state='disabled')
-
-    def _clear_file_selection(self):
-        self._reset_variables()
-        self._format_file_selection()
+        self._render_file_names(self.conversion_list)
 
     def _reset_variables(self):
         self.conversion_list = []
         self.conversion_file_text = "SELECTED FILES WILL BE SHOWN HERE"
+        self.completed = 0
+        self.incompleted = 0
+        self.duplicates = 0
+        self._render_file_names(self.conversion_list)
 
     def _convert_single_file(self, video_path):
         # retrieve file name and join with save directory
-        x = ntpath.basename(video_path)
-        file_name = f"{os.path.splitext(x)[0]}.mp3"
-        audio_path = ntpath.join(self.file_save_directory, file_name)
-        # todo get the progress of the conversion and update it to file progressbar
-        time.sleep(0.2)
-        # convert file
-        video = self.mp.VideoFileClip(video_path)
-        video.audio.write_audiofile(audio_path)
+        try:
+            x = ntpath.basename(video_path)
+            file_name = f"{os.path.splitext(x)[0]}.mp3"
+            audio_path = ntpath.join(self.file_save_directory, file_name)
+
+            # handle duplicates
+            if os.path.exists(audio_path):
+                self._monitor_completed(0, 0, 1)
+                return
+
+            # convert file
+            video = mp.VideoFileClip(video_path)
+            video.audio.write_audiofile(audio_path)
+            self._monitor_completed(1, 0, 0)
+        except Exception as e:
+            # handle none types
+            self._monitor_completed(0, 1, 0)
+            return
+
+    def _monitor_completed(self, x, y, z):
+        """keep track of files"""
+        self.completed += x
+        self.incompleted += y
+        self.duplicates += z
 
     def _convert_files(self, m, window):
         window.destroy()
@@ -196,62 +199,119 @@ class VideoToAudio:
         main_progress_frame = Toplevel(takefocus=True)
         main_progress_frame.wm_transient(self.root)
         main_progress_frame.configure(bg=self.grey)
-        main_progress_frame.maxsize(width=500, height=200)
-        main_progress_frame.minsize(width=500, height=200)
-        # main_progress_frame.title(self.percentage)
+        main_progress_frame.maxsize(width=700, height=300)
+        main_progress_frame.minsize(width=700, height=300)
         main_progress_frame.title(
             "Converting ....")  # todo make the progress window title dynamic to show percentage completion
         main_progress_frame.geometry("+%d+%d" % (self.rx + 650, self.ry + 450))
 
         main_progress_frame.iconbitmap(self.app_icon)
         main_progressbar = Progressbar(
-            main_progress_frame, orient=HORIZONTAL, length=400, maximum=10)
+            main_progress_frame, orient=HORIZONTAL, length=500, maximum=10)
         main_progressbar.pack(pady=10)
 
         main_progressbar_label = CTkLabel(main_progress_frame,
                                           textvariable=self.files_completed, bg_color=self.grey,)
         main_progressbar_label.pack()
 
-        # todo activate bar after getting progress of convertion
-        # file_progressbar = Progressbar(main_progress_frame, orient=HORIZONTAL, length=400)
-        # file_progressbar.grid(row=2,column=0,pady=20)
+        time_left_label = CTkLabel(main_progress_frame,
+                                   textvariable=self.time_left, bg_color=self.grey, text_font=("Arial", 8), anchor="w")
+        time_left_label.pack()
 
-        file_progressbar_label = CTkLabel(main_progress_frame, textvariable=self.current_file, bg_color=self.grey, text_font=("Montserrat", 7), anchor="w"
+        finishing_label = CTkLabel(main_progress_frame,
+                                   textvariable=self.finish_time, bg_color=self.grey, text_font=("Arial", 8), anchor="w")
+        finishing_label.pack()
+
+        file_progressbar = Progressbar(
+            main_progress_frame, orient=HORIZONTAL, length=500, mode="indeterminate")
+        file_progressbar.pack(pady=10)
+
+        file_progressbar_label = CTkLabel(main_progress_frame, textvariable=self.current_file, bg_color=self.grey, text_font=("Montserrat", 7),wraplength=450,anchor="w"
                                           )
-        file_progressbar_label.pack(pady=10,fill="both")
+        file_progressbar_label.pack()
 
         cancel_Button = CTkButton(
             main_progress_frame, text="Cancel conversion", command=event.set)
-        cancel_Button.pack()
+        cancel_Button.pack(pady=10)
 
+        # THREAD NESTED FUNCTIONS
         def update_delay(n):
             self.files_completed.set(n)
-            time.sleep(2)
+            time.sleep(1)
 
-        def finish():
+        def end_of_conversion(state, list_length):
             main_progress_frame.destroy()
-            self._clear_file_selection()
+            feedback = f"Converted files = {self.completed}\nDuplicates found = {self.duplicates}\nTotal files = {list_length}"
+            if not state:
+                messagebox.showinfo("Conversion complete",
+                                    f"All Done.\n{feedback}")
+            else:
+                messagebox.showerror(
+                    "Conversion canceled", f"Conversion canceled.\n{feedback}")
+            self._reset_variables()
+
+        def convert_time(seconds_to_convert):
+            mins, secs = divmod(seconds_to_convert, 60)
+            hours, mins = divmod(mins, 60)
+            hours = int(hours)
+            mins = int(mins)
+            secs = int(secs)
+            if hours > 0:
+                return f"{hours} hours and {mins} minutes left"
+            elif mins > 0:
+                return f'{mins} mins and {secs} seconds left'
+            else:
+                return f'{secs} seconds left'
+
+        def calc_time_left(t_start, curr_iter, max_iters):
+            t_elapsed = time.time() - t_start
+            if curr_iter == 1:
+                t_elapsed += 10
+            t_est = (t_elapsed/curr_iter)*max_iters
+            t_left = t_est - t_elapsed
+
+            f_time = t_start + t_est
+            f_time = datetime.datetime.fromtimestamp(
+                f_time).strftime("%H:%M:%S")
+
+            return convert_time(t_left),f_time
+
         update_delay("Preparing your files...")
         update_delay("Initializing conversion engine...")
 
         x = len(self.conversion_list)
+        render_list = self.conversion_list.copy()
+        file_progressbar.start(10)
+        start_time = time.time()
+        y = 0
 
-        for i in range(x):
-            if not event.is_set():
-                current = self.conversion_list[i]
-                filename = ntpath.basename(current)
-                self.files_completed.set(f"{i}/{x} file(s) completed")
-                self.percentage.set(f"{int((i / x) * 100)} progress completed")
-                self.current_file.set(f"Audiofying {filename}...")
-                self._convert_single_file(current)
-                main_progressbar["value"] += (10 / x)
-                self.root.update_idletasks()
-            else:
-                finish()
-                messagebox.showerror(
-                    "Conversion canceled", f"Conversion canceled.Only {i}/{x} files were converted")
-                return
+        # change to while for loop
+        while not event.is_set() and y < x:
+            current = self.conversion_list[y]
+            filename = ntpath.basename(current)
+            t = calc_time_left(start_time, y+1, x)
+            self.files_completed.set(f"{y}/{x} file(s) completed, ")
+            self.time_left.set(f"Time left: {t[0]}")
+            self.finish_time.set(f"End time: {t[1]}")
+            self.current_file.set(f"Audiofying {filename}...")
+            self._convert_single_file(current)
+            main_progressbar["value"] += (10 / x)
 
-        finish()
-        messagebox.showinfo("Conversion complete",
-                            "All your files have been converted.")
+            # update textbox after conversion
+            render_list.remove(current)
+            self._render_file_names(render_list)
+            self.root.update_idletasks()
+            y += 1
+
+        end_of_conversion(event.is_set(), x)
+
+    def _render_file_names(self, list_to_render):
+        """renders page content to bottom text box"""
+        text = ""
+        for i in list_to_render:
+            text += f"• {ntpath.basename(i)}\n"
+        self.conversion_file_text = "SELECTED FILES WILL BE SHOWN HERE" if len(
+            list_to_render) == 0 else text
+        self.files_textbox.delete(1.0, "end")
+        self.files_textbox.insert(END, self.conversion_file_text)
+        self.files_textbox.config(wrap=WORD)
