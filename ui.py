@@ -6,6 +6,7 @@ from os import listdir
 from os.path import isfile, join
 import ntpath
 import time
+from threading import Thread
 
 bg_color = 'white'
 import moviepy.editor as mp
@@ -37,6 +38,9 @@ class VideoToAudio:
         self.root.maxsize(800, 600)
         self.root.config(padx=50, pady=50)
 
+        self.rx = self.root.winfo_x()
+        self.ry = self.root.winfo_y()
+
         # MAIN MENU
         self.main_menu = Menu(self.root)
         self.root.configure(menu=self.main_menu)
@@ -57,7 +61,8 @@ class VideoToAudio:
 
         self.main_label = CTkLabel(self.home_frame, text="Audiofyyy!", text_font=("Montserrat", 30, "bold"))
         self.main_label.grid(row=0, column=0, columnspan=2)
-        self.description_label = CTkLabel(self.home_frame, text=f"Convert your {self.file_types} files to audio (.mp3) files",
+        self.description_label = CTkLabel(self.home_frame,
+                                          text=f"Convert your {self.file_types} files to audio (.mp3) files",
                                           text_font=("Montserrat", 15, "italic"))
         self.description_label.grid(row=1, column=0, columnspan=2)
 
@@ -92,14 +97,17 @@ class VideoToAudio:
 
     def _directory_popup(self):
         save_location_window = Toplevel(takefocus=True)
+        save_location_window.wm_transient(self.root)
         save_location_window.title("Save Location")
+        save_location_window.geometry("+%d+%d" % (self.rx + 400, self.ry + 300))
         save_location_window.iconbitmap(self.app_icon)
         save_query_label = CTkLabel(save_location_window, text="Where do you wish to save your file(s)?")
         save_query_label.grid(row=0, column=0, columnspan=2)
         current_btn = CTkButton(save_location_window, text="Save in current folder", fg_color=self.blue,
-                                command=lambda m="current", window=save_location_window: self._convert_files(m, window))
+                                command=lambda m="current", window=save_location_window: self._convert_files(m,
+                                                                                                             window))
         current_btn.grid(row=1, column=0, pady=15, padx=15)
-        different_btn = CTkButton(save_location_window, text="Save in different folder",fg_color=self.blue,
+        different_btn = CTkButton(master=save_location_window, text="Save in different folder", fg_color=self.blue,
                                   command=lambda m="different", window=save_location_window: self._convert_files(m,
                                                                                                                  window))
         different_btn.grid(row=1, column=1, padx=15)
@@ -156,15 +164,18 @@ class VideoToAudio:
         # retrieve file name and join with save directory
         file_name = f"{ntpath.basename(video_path).split('.')[:-1]}.mp3"
         audio_path = ntpath.join(self.file_save_directory, file_name)
-        time.sleep(1)
         ## todo get the progress of the conversion and update it to file progressbar
 
         # convert file
-        # video = self.mp.VideoFileClip(video_path)
-        # video.audio.write_audiofile(audio_path)
+        video = self.mp.VideoFileClip(video_path)
+        video.audio.write_audiofile(audio_path)
 
     def _convert_files(self, m, window):
         window.destroy()
+        t = Thread(target=self.run_threading, args=(m,))
+        t.start()
+
+    def run_threading(self, m):
         self.file_save_directory = filedialog.askdirectory() if m == "different" else self.file_save_directory
         x = len(self.conversion_list)
         if x == 0:
@@ -172,23 +183,28 @@ class VideoToAudio:
             return
         # Bars
         main_progress_frame = Toplevel(takefocus=True)
+        main_progress_frame.wm_transient(self.root)
+        main_progress_frame.configure(bg=self.grey)
         main_progress_frame.maxsize(width=500, height=300)
         main_progress_frame.minsize(width=500, height=300)
-        main_progress_frame.title(self.percentage)
+        # main_progress_frame.title(self.percentage)
+        main_progress_frame.title(
+            "Converting ....")  # todo make the progress window title dynamic to show percentage completion
+        main_progress_frame.geometry("+%d+%d" % (self.rx + 650, self.ry + 450))
 
         main_progress_frame.iconbitmap(self.app_icon)
         main_progressbar = Progressbar(main_progress_frame, orient=HORIZONTAL, length=400)
-        main_progressbar.pack()
+        main_progressbar.pack(pady=20)
         main_progressbar_label = CTkLabel(main_progress_frame,
-                                          textvariable=self.files_completed)
+                                          textvariable=self.files_completed, bg_color=self.grey,wraplength=300, justify="center")
         main_progressbar_label.pack()
 
         ## file progress bar
         ## todo activate bar after getting progress of convertion
         # file_progressbar = Progressbar(main_progress_frame, orient=HORIZONTAL, length=400)
         # file_progressbar.pack()
-        file_progressbar_label = CTkLabel(main_progress_frame, textvariable=self.current_file)
-        file_progressbar_label.pack()
+        file_progressbar_label = CTkLabel(main_progress_frame, textvariable=self.current_file, bg_color=self.grey,wraplength=300, justify="center")
+        file_progressbar_label.pack(pady=20)
 
         for i in range(x):
             main_progressbar["value"] += (10 / x)
