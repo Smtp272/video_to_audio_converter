@@ -101,6 +101,7 @@ class VideoToAudio:
         self.files_completed = StringVar()
 
         # mainloop
+        self._render_file_names([])
         self._reset_variables()
         self.root.mainloop()
 
@@ -117,10 +118,10 @@ class VideoToAudio:
         save_query_label = CTkLabel(
             save_location_window, text="Where do you wish to save your file(s)?")
         save_query_label.grid(row=0, column=0, columnspan=2)
-        current_btn = CTkButton(save_location_window, text="Save in current folder", fg_color=self.blue,
+        current_btn = CTkButton(save_location_window, text="Current folder", fg_color=self.blue,
                                 command=lambda: self._convert_files("current", save_location_window))
         current_btn.grid(row=1, column=0, pady=15, padx=15)
-        different_btn = CTkButton(master=save_location_window, text="Save in different folder", fg_color=self.blue,
+        different_btn = CTkButton(master=save_location_window, text="Choose different folder", fg_color=self.blue,
                                   command=lambda: self._convert_files("different",
                                                                       save_location_window))
         different_btn.grid(row=1, column=1, padx=15)
@@ -156,7 +157,7 @@ class VideoToAudio:
         self.completed = 0
         self.incompleted = 0
         self.duplicates = 0
-        self._render_file_names(self.conversion_list)
+        
 
     def _convert_single_file(self, video_path):
         # retrieve file name and join with save directory
@@ -211,22 +212,25 @@ class VideoToAudio:
         main_progressbar.pack(pady=10)
 
         main_progressbar_label = CTkLabel(main_progress_frame,
-                                          textvariable=self.files_completed, bg_color=self.grey,)
+                                          textvariable=self.files_completed, bg_color=self.grey, )
         main_progressbar_label.pack()
 
         time_left_label = CTkLabel(main_progress_frame,
-                                   textvariable=self.time_left, bg_color=self.grey, text_font=("Arial", 8), anchor="w")
+                                   textvariable=self.time_left, bg_color=self.grey, text_font=("Arial", 8))
         time_left_label.pack()
 
         finishing_label = CTkLabel(main_progress_frame,
-                                   textvariable=self.finish_time, bg_color=self.grey, text_font=("Arial", 8), anchor="w")
+                                   textvariable=self.finish_time, bg_color=self.grey, text_font=(
+                                       "Arial", 8),
+                                   anchor="w")
         finishing_label.pack()
 
         file_progressbar = Progressbar(
             main_progress_frame, orient=HORIZONTAL, length=500, mode="indeterminate")
         file_progressbar.pack(pady=10)
 
-        file_progressbar_label = CTkLabel(main_progress_frame, textvariable=self.current_file, bg_color=self.grey, text_font=("Montserrat", 7),wraplength=450,anchor="w"
+        file_progressbar_label = CTkLabel(main_progress_frame, textvariable=self.current_file, bg_color=self.grey,
+                                          text_font=("Montserrat", 7), wraplength=450, anchor="w"
                                           )
         file_progressbar_label.pack()
 
@@ -240,6 +244,7 @@ class VideoToAudio:
             time.sleep(1)
 
         def end_of_conversion(state, list_length):
+            self._render_file_names([])
             main_progress_frame.destroy()
             feedback = f"Converted files = {self.completed}\nDuplicates found = {self.duplicates}\nTotal files = {list_length}"
             if not state:
@@ -257,24 +262,24 @@ class VideoToAudio:
             mins = int(mins)
             secs = int(secs)
             if hours > 0:
-                return f"{hours} hours and {mins} minutes left"
+                return f"{hours} hours and {mins} minutes left" if hours > 1 else f"{hours} hour {mins} minutes left"
             elif mins > 0:
-                return f'{mins} mins and {secs} seconds left'
+                return f'{mins} minutes and {secs} seconds left' if mins > 1 else f'{mins} minute {secs} seconds left'
             else:
-                return f'{secs} seconds left'
+                return f'{secs} seconds left' if secs > 1 else f'{secs} second left.'
 
         def calc_time_left(t_start, curr_iter, max_iters):
             t_elapsed = time.time() - t_start
-            if curr_iter == 1:
+            if curr_iter == 0:
                 t_elapsed += 10
-            t_est = (t_elapsed/curr_iter)*max_iters
+            t_est = (t_elapsed / (self.completed + 1 if self.completed==0 else self.completed)) * max_iters
             t_left = t_est - t_elapsed
 
             f_time = t_start + t_est
             f_time = datetime.datetime.fromtimestamp(
-                f_time).strftime("%H:%M:%S")
+                f_time).strftime("%I:%M:%S %p")
 
-            return convert_time(t_left),f_time
+            return convert_time(t_left), f_time
 
         update_delay("Preparing your files...")
         update_delay("Initializing conversion engine...")
@@ -289,24 +294,27 @@ class VideoToAudio:
         while not event.is_set() and y < x:
             current = self.conversion_list[y]
             filename = ntpath.basename(current)
-            t = calc_time_left(start_time, y+1, x)
-            self.files_completed.set(f"{y}/{x} file(s) completed, ")
-            self.time_left.set(f"Time left: {t[0]}")
-            self.finish_time.set(f"End time: {t[1]}")
+            t = calc_time_left(start_time, y, x)
+            f = "file" if y == 0 else "files"
+            self.files_completed.set(f"{y}/{x} {f} completed.")
+            self.time_left.set(f"{t[0]}")
+            self.finish_time.set(f"Estimated completion time: {t[1]}")
             self.current_file.set(f"Audiofying {filename}...")
+            self._render_file_names(render_list, converting=True)
             self._convert_single_file(current)
             main_progressbar["value"] += (10 / x)
 
             # update textbox after conversion
             render_list.remove(current)
-            self._render_file_names(render_list)
             self.root.update_idletasks()
             y += 1
 
         end_of_conversion(event.is_set(), x)
 
-    def _render_file_names(self, list_to_render):
+    def _render_file_names(self, list_to_render, **kwargs):
         """renders page content to bottom text box"""
+        tag_font = ("Montserrat", 10)
+        kwargs.get('converting', False)
         text = ""
         for i in list_to_render:
             text += f"• {ntpath.basename(i)}\n"
@@ -314,4 +322,10 @@ class VideoToAudio:
             list_to_render) == 0 else text
         self.files_textbox.delete(1.0, "end")
         self.files_textbox.insert(END, self.conversion_file_text)
+        if kwargs.get('converting'):
+            self.files_textbox.tag_add("top_highlight", "1.0", "1.end+1c")
+            self.files_textbox.tag_config(
+                "top_highlight", font=tag_font, foreground="red")
+        else:
+            self.files_textbox.tag_remove("top_highlight", "1.0", "1.end+1c")
         self.files_textbox.config(wrap=WORD)
