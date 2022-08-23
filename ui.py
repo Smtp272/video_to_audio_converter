@@ -37,8 +37,6 @@ class VideoToAudio:
         self.completed = 0
         self.incompleted = 0
         self.duplicates = 0
-        self.clip = None
-
 
         # Thread man
         self.event = Event()
@@ -164,7 +162,7 @@ class VideoToAudio:
         self.duplicates = 0
 
     def _convert_single_file(self, video_path):
-        try: 
+        try:
             # retrieve file name and join with save directory           
             x = ntpath.basename(video_path)
             file_name = f"{os.path.splitext(x)[0]}.mp3"
@@ -174,19 +172,21 @@ class VideoToAudio:
             if os.path.exists(audio_path):
                 self._monitor_completed(0, 0, 1)
                 return
-            
-            self.clip = mp.VideoFileClip(video_path)
-            duration = self.clip.duration
-            file_timeout = (duration*3)//60
+
+            clip = mp.VideoFileClip(video_path)
+            duration = clip.duration
+            file_timeout = (duration * 3) // 60
+
             def e():
                 # convert file
-                self.clip.audio.write_audiofile(audio_path)
-                self.clip.close()
+                clip.audio.write_audiofile(audio_path)
+                clip.close()
                 self._monitor_completed(1, 0, 0)
+
             func_timeout.func_timeout(file_timeout, e)
 
         except func_timeout.FunctionTimedOut:
-            #handle long conversions
+            # handle long conversions
             self._monitor_completed(0, 1, 0)
         except Exception as e:
             # handle none types
@@ -203,7 +203,6 @@ class VideoToAudio:
         event = Event()
         t = Thread(target=self.run_threading, args=(m, event))
         t.start()
-
 
     @calc_time
     def run_threading(self, m, event):
@@ -234,7 +233,7 @@ class VideoToAudio:
 
         finishing_label = CTkLabel(main_progress_frame,
                                    textvariable=self.finish_time, bg_color=self.grey, text_font=(
-                                       "Arial", 8),
+                "Arial", 8),
                                    anchor="w")
         finishing_label.pack()
 
@@ -248,20 +247,10 @@ class VideoToAudio:
         file_progressbar_label.pack()
 
         cancel_Button = CTkButton(
-            main_progress_frame, text="Cancel conversion", command=lambda :cancel_operation(event))
+            main_progress_frame, text="Cancel conversion", command=lambda: event.set())
         cancel_Button.pack(pady=10)
 
-
         # THREAD NESTED FUNCTIONS
-        def update_delay(n):
-            self.files_completed.set(n)
-            time.sleep(1)
-
-        def cancel_operation(event):
-            self.clip.close()
-            event.set()
-
-
         def convert_time(seconds_to_convert):
             mins, secs = divmod(seconds_to_convert, 60)
             hours, mins = divmod(mins, 60)
@@ -269,37 +258,34 @@ class VideoToAudio:
             mins = int(mins)
             secs = int(secs)
             if hours > 0:
-                return f"{hours} hours {mins} minutes" if hours !=1 else f"{hours} hour {mins} minutes"
+                return f"{hours} hours {mins} minutes" if hours != 1 else f"{hours} hour {mins} minutes"
             elif mins > 0:
-                return f'{mins} minutes {secs} seconds' if mins !=1 else f'{mins} minute {secs} seconds'
+                return f'{mins} minutes {secs} seconds' if mins != 1 else f'{mins} minute {secs} seconds'
             else:
                 return f'{secs} seconds'
 
-
-        def calc_time_left(t_start,remaining_list):
+        def calc_time_left(remaining_list):
             reducer_list = remaining_list.copy()
 
             def get_time(n):
                 return mp.VideoFileClip(n).duration
 
-            x = list(map(lambda n: int(get_time(n)), reducer_list))
-            total_file_time = reduce(lambda a,b :a+b, x)
+            duration_list = list(map(lambda n: int(get_time(n)), reducer_list))
+            total_file_time = reduce(lambda a, b: a + b, duration_list)
             divisor = 30
 
-            t_elapsed = time.time() - t_start
-            t_est = total_file_time // divisor
-            t_left = t_est - t_elapsed
+            t_left = total_file_time // divisor
 
-            f_time = t_start + t_est
+            f_time = time.time() + t_left
             f_time = datetime.datetime.fromtimestamp(
                 f_time).strftime("%I:%M:%S %p")
 
             return convert_time(t_left), f_time
 
-        def end_of_conversion(state, list_length,start,end):
+        def end_of_conversion(state, list_length, start, end):
             self._render_file_names([])
             main_progress_frame.destroy()
-            time_taken = convert_time(end-start)
+            time_taken = convert_time(end - start)
             feedback = f"\nConverted files = {self.completed}\nFailed aborted/conversions = {self.incompleted}\nDuplicates found = {self.duplicates}\nTotal files = {list_length}\nTime taken = {time_taken}"
             if not state:
                 messagebox.showinfo("Conversion complete",
@@ -309,8 +295,8 @@ class VideoToAudio:
                     "Conversion canceled", f"Conversion canceled.\n{feedback}")
             self._reset_variables()
 
-        update_delay("Preparing your files...")
-        update_delay("Initializing conversion engine...")
+        self.files_completed.set("Initializing conversion engine...")
+        self.root.after(1000, self.files_completed.set("Initializing conversion engine..."))
 
         x = len(self.conversion_list)
         render_list = self.conversion_list.copy()
@@ -322,8 +308,8 @@ class VideoToAudio:
         while not event.is_set() and y < x:
             current = self.conversion_list[y]
             filename = ntpath.basename(current)
-            t = calc_time_left(start_time,render_list)
-            f = "file" if y == 0 else "files"
+            t = calc_time_left(render_list)
+            f = "file" if y == 1 else "files"
             self.files_completed.set(f"{y}/{x} {f} completed.")
             self.time_left.set(f"{t[0]} left")
             self.finish_time.set(f"Approx completion time: {t[1]}")
@@ -331,14 +317,14 @@ class VideoToAudio:
             self._render_file_names(render_list, converting=True)
             self._convert_single_file(current)
             main_progressbar["value"] += (10 / x)
+            self.root.update_idletasks()
 
             # update textbox after conversion
             render_list.remove(current)
-            self.root.update_idletasks()
             y += 1
 
         end_time = time.time()
-        end_of_conversion(event.is_set(), x,start_time,end_time)
+        end_of_conversion(event.is_set(), x, start_time, end_time)
 
     def _render_file_names(self, list_to_render, **kwargs):
         """renders page content to bottom text box"""
