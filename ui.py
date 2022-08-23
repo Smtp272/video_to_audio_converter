@@ -8,6 +8,7 @@ from os.path import isfile, join
 from threading import Thread, Event
 from tkinter import filedialog, Menu, Frame, END, scrolledtext, Toplevel, messagebox, HORIZONTAL, WORD, StringVar
 from tkinter.ttk import Progressbar
+import tkinter
 
 import func_timeout
 import moviepy.editor as mp
@@ -85,19 +86,19 @@ class VideoToAudio:
         self.description_label.grid(row=1, column=0, columnspan=2)
 
         self.select_files_btn = CTkButton(self.home_frame, text="Select Files(s)", fg_color=self.grey,
-                                          command=self._upload_files)
+                                          command=lambda: self._manage_btn("select_files"))
         self.select_files_btn.grid(row=2, column=0, pady=10)
 
         self.select_files_btn = CTkButton(self.home_frame, text="Select Folder", fg_color=self.grey,
-                                          command=self._upload_folder)
+                                          command=lambda: self._manage_btn("select_folder"))
         self.select_files_btn.grid(row=2, column=1)
 
-        self.clear_btn = CTkButton(self.home_frame, text="Clear Selection", command=self._reset_variables,
+        self.clear_btn = CTkButton(self.home_frame, text="Clear Selection", command=lambda: self._manage_btn("clear_selection"),
                                    fg_color=self.grey)
         self.clear_btn.grid(row=3, column=0, columnspan=2)
 
-        self.convert_btn = CTkButton(self.home_frame, text="Convert selected files", fg_color="orange3",
-                                     command=self._directory_popup)
+        self.convert_btn = CTkButton(self.home_frame, text="Convert selected files", fg_color="orange3",state="normal",
+                                     command=lambda: self._manage_btn("convert_selection"))
         self.convert_btn.grid(row=4, column=0, columnspan=2, pady=10)
 
         self.files_textbox = scrolledtext.ScrolledText(self.home_frame, height=15, bg=self.grey,
@@ -136,6 +137,20 @@ class VideoToAudio:
                                   command=lambda: self._convert_files("different",
                                                                       save_location_window))
         different_btn.grid(row=1, column=1, padx=15)
+
+    def _manage_btn(self, btn):
+        if self.convert_btn.state == tkinter.DISABLED:
+            messagebox.showerror("Conversion in Progress", "There is an ongoing conversion process. End it to select other files")
+            return
+        else:
+            if btn == "select_files":
+                self._upload_files()
+            elif btn =="select_folder":
+                self._upload_folder()
+            elif btn == "clear_selection":
+                self._reset_variables()
+            elif btn=="convert_selection":
+                self._directory_popup()
 
     def _upload_files(self):
         files = filedialog.askopenfiles(
@@ -237,6 +252,8 @@ class VideoToAudio:
         render_list = self.conversion_list.copy()
         start_time = time.time()
         y = 0
+        self.convert_btn.configure(state=tkinter.DISABLED, text="Converting files...")
+        self.clear_btn.configure(state=tkinter.DISABLED)
 
         main_progress_frame = Toplevel(takefocus=True)
         main_progress_frame.wm_transient(self.root)
@@ -329,6 +346,8 @@ class VideoToAudio:
 
         def end_of_conversion(state, list_length, start, end):
             self._render_file_names([], False)
+            self.convert_btn.configure(state=tkinter.NORMAL, text="Convert selected files")
+            self.clear_btn.configure(state=tkinter.NORMAL)
             main_progress_frame.destroy()
             time_taken = convert_time(end - start)
             feedback = f"\nConverted files = {self.completed}\nDuplicates found = {self.duplicates}\nFailed/aborted conversions = {self.incompleted}\nTotal files = {list_length}\nTime taken = {time_taken}"
@@ -375,6 +394,7 @@ class VideoToAudio:
             text += f"• {ntpath.basename(i)}\n"
         self.conversion_file_text = "SELECTED FILES WILL BE SHOWN HERE" if len(
             list_to_render) == 0 else text
+        self.files_textbox.config(state="normal")
         self.files_textbox.delete(1.0, "end")
         self.files_textbox.insert(END, self.conversion_file_text)
         if converting:
@@ -383,4 +403,4 @@ class VideoToAudio:
                 "top_highlight", font=tag_font, foreground="red")
         else:
             self.files_textbox.tag_remove("top_highlight", "1.0", "1.end+1c")
-        self.files_textbox.config(wrap=WORD)
+        self.files_textbox.config(wrap=WORD, state="disabled")
