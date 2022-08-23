@@ -2,7 +2,6 @@ import datetime
 import ntpath
 import os
 import time
-from functools import reduce
 from os import listdir
 from os.path import isfile, join
 from threading import Thread, Event
@@ -40,13 +39,16 @@ class VideoToAudio:
 
         # VARIABLES
         self.conversion_list = []
-        self.conversion_file_text = ""
+        self.textbox_file_text = ""
         self.file_save_directory = None
         self.completed = 0
-        self.incompleted = 0
+        self.skipped = 0
         self.duplicates = 0
+        self.duplicates_list = []
+        self.skipped_list = []
 
         # Thread man
+        self.threads = []
         self.event = Event()
 
         # /********ROOT**********/
@@ -93,11 +95,12 @@ class VideoToAudio:
                                           command=lambda: self._manage_btn("select_folder"))
         self.select_files_btn.grid(row=2, column=1)
 
-        self.clear_btn = CTkButton(self.home_frame, text="Clear Selection", command=lambda: self._manage_btn("clear_selection"),
+        self.clear_btn = CTkButton(self.home_frame, text="Clear Selection",
+                                   command=lambda: self._manage_btn("clear_selection"),
                                    fg_color=self.grey)
         self.clear_btn.grid(row=3, column=0, columnspan=2)
 
-        self.convert_btn = CTkButton(self.home_frame, text="Convert selected files", fg_color="orange3",state="normal",
+        self.convert_btn = CTkButton(self.home_frame, text="Convert selected files", fg_color="orange3", state="normal",
                                      command=lambda: self._manage_btn("convert_selection"))
         self.convert_btn.grid(row=4, column=0, columnspan=2, pady=10)
 
@@ -113,7 +116,7 @@ class VideoToAudio:
         self.files_completed_var = StringVar()
 
         # mainloop
-        self._render_file_names(self.conversion_list, False)
+        self._render_file_names(self.conversion_list, False, False)
         self._reset_variables()
         self.root.mainloop()
 
@@ -121,6 +124,7 @@ class VideoToAudio:
         if len(self.conversion_list) == 0:
             messagebox.showerror("No files", "No files selected to convert")
             return
+        print(self.conversion_list)
         save_location_window = Toplevel()
         save_location_window.wm_transient(self.root)
         save_location_window.title("Save Location")
@@ -140,16 +144,18 @@ class VideoToAudio:
 
     def _manage_btn(self, btn):
         if self.convert_btn.state == tkinter.DISABLED:
-            messagebox.showerror("Conversion in Progress", "There is an ongoing conversion process. End it to select other files")
+            messagebox.showerror("Conversion in Progress",
+                                 "There is an ongoing conversion process. End it to select other files")
             return
         else:
             if btn == "select_files":
                 self._upload_files()
-            elif btn =="select_folder":
+            elif btn == "select_folder":
                 self._upload_folder()
             elif btn == "clear_selection":
                 self._reset_variables()
-            elif btn=="convert_selection":
+                self._render_file_names([], False, False)
+            elif btn == "convert_selection":
                 self._directory_popup()
 
     def _upload_files(self):
@@ -159,7 +165,7 @@ class VideoToAudio:
             return
         self.conversion_list = [i.name for i in files]
         self.file_save_directory = ntpath.dirname(self.conversion_list[0])
-        self._render_file_names(self.conversion_list, False)
+        self._render_file_names(self.conversion_list, False, False)
 
     def _upload_folder(self):
         directory = filedialog.askdirectory()
@@ -174,79 +180,88 @@ class VideoToAudio:
                 "Error", "No video files found in selected folder")
             return
         self.file_save_directory = directory
-        self._render_file_names(self.conversion_list, False)
+        self._render_file_names(self.conversion_list, False, False)
 
     def _reset_variables(self):
         self.conversion_list = []
-        self.conversion_file_text = "SELECTED FILES WILL BE SHOWN HERE"
         self.completed = 0
-        self.incompleted = 0
+        self.skipped = 0
         self.duplicates = 0
         self.file_save_directory = None
+        self.event = Event()
+        self.finish_time_var.set("")
+        self.time_left_var.set("")
+        self.current_file_var.set("")
+        self.files_completed_var.set("")
 
     def _convert_single_file(self, video_path):
-        def audio_path():
+        def get_audio_path():
             x = ntpath.basename(video_path)
             file_name = f"{os.path.splitext(x)[0]}.mp3"
-            return ntpath.join(self.file_save_directory, file_name)
+            return ntpath.join(self.file_save_directory, file_name), file_name
 
-        def convert_file():
+        def convert_file(path):
             """convert file to mp3"""
             clip = mp.VideoFileClip(video_path)
-            clip.audio.write_audiofile(audio_path)
+            clip.audio.write_audiofile(path)
+            self.completed += 1
             clip.close()
-            self._monitor_completed(1, 0, 0)
 
+        audio_details = get_audio_path()
+        audio_path = audio_details[0]
+        audio_file_name = audio_details[1]
         try:
-            audio_path = audio_path()
             # check if file already exists
             if os.path.exists(audio_path):
                 raise FileExistsError("")
             time_out = VideoToAudio._get_file_duration(video_path) // 30
-            func_timeout.func_timeout(time_out, convert_file)
+            func_timeout.func_timeout(time_out, convert_file, (audio_path,))
         except Exception as e:
             if type(e) == FileExistsError:
-                self._monitor_completed(0, 0, 1)
+                self.duplicates += 1
+                self.duplicates_list.append(audio_file_name)
             else:
-                # handle none types and long conversions
-                self._monitor_completed(0, 1, 0)
+                # handle none types, skipped files and long conversions
+                self.skipped += 1
+                self.skipped_list.append(audio_file_name)
         finally:
             return
 
     @staticmethod
     def _get_file_duration(video_path):
-        t = 0
-
         def cv_timeout():
-            video = cv2.VideoCapture(video_path)
-            frames = video.get(cv2.CAP_PROP_FRAME_COUNT)
-            fps = video.get(cv2.CAP_PROP_FPS)
-            return int(frames / fps)
+            try:
+                video = cv2.VideoCapture(video_path)
+                frames = video.get(cv2.CAP_PROP_FRAME_COUNT)
+                fps = video.get(cv2.CAP_PROP_FPS)
+                x = int(frames / fps)
+                return 600 if x <= 0 else x
+            except Exception:
+                return 600
 
+        t = 0
         try:
             t = func_timeout.func_timeout(0.5, cv_timeout)
-        except Exception as e:
+        except Exception:
             t = 600
         finally:
             return t
 
-    def _monitor_completed(self, x, y, z):
-        """keep track of files"""
-        self.completed += x
-        self.incompleted += y
-        self.duplicates += z
-
     def _convert_files(self, m, window):
         self.file_save_directory = filedialog.askdirectory(
         ) if m == "different" else self.file_save_directory
-        window.destroy()
         event = Event()
-        t = Thread(target=self.run_threading, args=(event,))
-        t.start()
+        t1 = Thread(target=self.run_threading)
+        window.destroy()
+        t1.start()
+        print("process has finished")
+        # t = multiprocessing.Process(target=self.run_threading,args=(t,))
+        # t = Thread(target=self.run_threading, args=(event,))
+        # t.start()
         # t.join()
 
     @calc_time
-    def run_threading(self, event):
+    def run_threading(self):
         # Bars
         x = len(self.conversion_list)
         render_list = self.conversion_list.copy()
@@ -293,7 +308,7 @@ class VideoToAudio:
         file_progressbar_label.pack()
 
         cancel_Button = CTkButton(
-            main_progress_frame, text="Cancel conversion", command=lambda: event.set())
+            main_progress_frame, text="Cancel conversion", command=lambda: self.event.set())
         cancel_Button.pack(pady=10)
 
         # THREAD NESTED FUNCTIONS
@@ -345,12 +360,12 @@ class VideoToAudio:
                 return convert_time(t_left), f_time
 
         def end_of_conversion(state, list_length, start, end):
-            self._render_file_names([], False)
+            self._render_file_names([], False, True)
             self.convert_btn.configure(state=tkinter.NORMAL, text="Convert selected files")
             self.clear_btn.configure(state=tkinter.NORMAL)
             main_progress_frame.destroy()
             time_taken = convert_time(end - start)
-            feedback = f"\nConverted files = {self.completed}\nDuplicates found = {self.duplicates}\nFailed/aborted conversions = {self.incompleted}\nTotal files = {list_length}\nTime taken = {time_taken}"
+            feedback = f"\n{self.completed} files converted.\n{self.duplicates} duplicates found.\n{self.skipped} failed conversions.\n{list_length} total files.\nTime taken = {time_taken}"
             if not state:
                 messagebox.showinfo("Conversion complete",
                                     f"All Done.\n{feedback}")
@@ -365,18 +380,17 @@ class VideoToAudio:
         self.files_completed_var.set("Initializing conversion engine...")
 
         # change to while for loop
-        while not event.is_set() and y < x:
+        while not self.event.is_set() and y < x:
             current = self.conversion_list[y]
             filename = ntpath.basename(current)
             t = calc_time_left(render_list, start_time, y, x)
-            # t = calc_time_left(render_list)
             self.files_completed_var.set(
                 f"{int((y / x) * 100)}% complete.\n\nEstimated completion time: {t[1]}")
             self.time_left_var.set(f"{t[0]} left")
             self.finish_time_var.set(
-                f"{self.completed} files converted, {self.duplicates} duplicates found {self.incompleted} files skipped\nConverting file {y} of {x}")
+                f"{self.completed} files converted, {self.duplicates} duplicates found, {self.skipped} skipped\nConverting file {y + 1} of {x}")
             self.current_file_var.set(f"Audiofying {filename}...")
-            self._render_file_names(render_list, True)
+            self._render_file_names(render_list, True, False)
             self._convert_single_file(current)
             main_progressbar["value"] += (10 / x)
             self.root.update_idletasks()
@@ -384,19 +398,41 @@ class VideoToAudio:
             render_list.remove(current)
             y += 1
         end_time = time.time()
-        end_of_conversion(event.is_set(), x, start_time, end_time)
+        end_of_conversion(self.event.is_set(), x, start_time, end_time)
 
-    def _render_file_names(self, list_to_render, converting):
+    def _render_file_names(self, list_to_render, converting, final):
         """renders page content to bottom text box"""
         tag_font = ("Montserrat", 10)
         text = ""
-        for i in list_to_render:
-            text += f"• {ntpath.basename(i)}\n"
-        self.conversion_file_text = "SELECTED FILES WILL BE SHOWN HERE" if len(
-            list_to_render) == 0 else text
+        dup_info = "DUPLICATE FILES FOUND\n\n"
+        skipped_info = "FILES THAT WERE NOT CONVERTED\n\n"
+
+        if final:
+            i, j = len(self.duplicates_list), len(self.skipped_list)
+            for i in self.duplicates_list:
+                dup_info += f"• {i}\n"
+            for i in self.skipped_list:
+                skipped_info += f"• {i}\n"
+            if i == 0:
+                if j == 0:
+                    self.textbox_file_text = "ALL FILES WERE SUCCESSFULLY CONVERTED"
+                else:
+                    self.textbox_file_text = f"\n\n{skipped_info}"
+            elif j == 0 and i > 0:
+                self.textbox_file_text = f"{dup_info}"
+            else:
+                self.textbox_file_text = f"{skipped_info}\n\n{dup_info}"
+        else:
+            if len(list_to_render) == 0:
+                text = "SELECTED FILES WILL BE DISPLAYED HERE"
+            else:
+                for i in list_to_render:
+                    text += f"• {ntpath.basename(i)}\n"
+            self.textbox_file_text = text
+
         self.files_textbox.config(state="normal")
         self.files_textbox.delete(1.0, "end")
-        self.files_textbox.insert(END, self.conversion_file_text)
+        self.files_textbox.insert(END, self.textbox_file_text)
         if converting:
             self.files_textbox.tag_add("top_highlight", "1.0", "1.end+1c")
             self.files_textbox.tag_config(
