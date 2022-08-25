@@ -314,7 +314,7 @@ class VideoToAudio:
                 f"{self.completed} converted, {self.duplicates} duplicates found, {self.failed + self.aborted} aborted\nConverting file {y + 1} of {max_iter}  ")
             self.current_file_var.set(f"Audiofying {filename}...")
             self._render_file_names(render_list, converting=True)
-            # self._convert_single_file(current)
+            self._convert_single_file(current)
             try:
                 d_window.main_progressbar["value"] += (10 / max_iter)
             except:
