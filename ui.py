@@ -4,7 +4,7 @@ import time
 from os import listdir
 from os.path import isfile, join
 from threading import Thread, Event
-from tkinter import filedialog, Menu, Frame, END, scrolledtext, messagebox,WORD, StringVar
+from tkinter import filedialog, Menu, Frame, END, scrolledtext, messagebox, WORD, StringVar,Label
 import tkinter
 
 import func_timeout
@@ -12,9 +12,7 @@ import moviepy.editor as mp
 from customtkinter import CTkButton, CTkLabel, CTk
 from windows import DWindow, folder_select
 
-from functions import convert_time, get_file_duration, calc_time_left
-
-bg_color = 'white'
+from functions import convert_time, get_file_duration, calc_time_left, open_webpage,generate_total_file_time
 
 
 class FileExistsError(Exception):
@@ -49,7 +47,6 @@ class VideoToAudio:
         self.last_f_skipped = False
         self.prev_end = 0
         self.prev_start = 0
-        self.conversion_start = None
 
         # Thread man
         self.threads = []
@@ -58,7 +55,7 @@ class VideoToAudio:
         # /********ROOT**********/
         # self.root = tkinter.Tk()
         self.root = CTk()
-        self.root.title("Text to speech")
+        self.root.title("Audiofy")
         self.root.iconbitmap(self.app_icon)
         self.root.geometry(f"{800}x{600}")
         self.root.minsize(800, 600)
@@ -125,7 +122,6 @@ class VideoToAudio:
         self.percentage_text_label.grid(row=0, column=0, sticky="w")
         self.time_left_label = CTkLabel(self.progress_frame, bg_color=self.blue, textvariable=self.time_left_label_var)
         self.time_left_label.grid(row=0, column=1)
-
         self.scroll_frame = Frame(self.home_frame)
         self.scroll_frame.grid(row=6, column=0, columnspan=2, padx=(10, 10))
         self.files_textbox = scrolledtext.ScrolledText(self.scroll_frame, height=15, bg=self.grey,
@@ -133,6 +129,9 @@ class VideoToAudio:
         self.files_textbox.pack(fill="both")
         self.files_textbox.tag_add("top_highlight", "1.0", "1.end+1c")
 
+        self.footer_label = Label(self.home_frame, bg=self.blue, text="Audiofy by Siwa©",font=("Montserrat",10,))
+        self.footer_label.grid(row=7, column=0, columnspan=2)
+        self.footer_label.bind("<Button-1>", open_webpage)
         # mainloop
         self._render_file_names(self.conversion_list)
         self._reset_variables()
@@ -148,20 +147,21 @@ class VideoToAudio:
     def _cancel_conversion(self):
         return messagebox.askokcancel("Stop conversion", "Cancel ongoing conversion?")
 
-    def _end_of_conversion(self):
-        self._render_file_names([], final=True)
+    def _end_of_conversion(self, t_start):
         self.convert_btn.configure(
             state=tkinter.NORMAL, text="Convert selected files")
         self.clear_btn.configure(state=tkinter.NORMAL, text="Clear Selection",
                                  command=lambda: self._manage_btn("clear_selection"))
-        time_taken = convert_time(self.prev_end - self.conversion_start)
-        feedback = f"\n{self.completed} files converted.\n{self.duplicates} duplicates found.\n{self.failed + self.aborted} failed conversions.\n{len(self.conversion_list)} total files.\nTime taken = {time_taken}"
+        time_taken = convert_time(time.time() - t_start)
+        feedback = f"\n{self.completed} files converted.\n{self.duplicates} duplicates found.\n{self.failed + self.aborted} failedf.\n{len(self.conversion_list)} total files.\nTime taken = {time_taken}"
         if not self.event.is_set():
             messagebox.showinfo("Conversion complete",
                                 f"All Done.\n{feedback}")
+            self._render_file_names([], final=True)
         else:
             messagebox.showerror(
                 "Conversion canceled", f"Conversion canceled.\n{feedback}")
+            self._render_file_names([], final=True, completed=False)
         self._reset_variables()
 
     def _manage_btn(self, btn):
@@ -226,7 +226,6 @@ class VideoToAudio:
         self.last_f_skipped = False
         self.prev_end = 0
         self.prev_start = 0
-        self.conversion_start = None
 
     def _convert_single_file(self, video_path):
         def convert_file(path):
@@ -244,6 +243,9 @@ class VideoToAudio:
             # check if file already exists
             if os.path.exists(audio_path):
                 raise FileExistsError("")
+
+            # average time to complete = file duration in seconds // 30
+            # accounting for exceptions set timeout=duration//20
             time_out = get_file_duration(video_path) // 20
             func_timeout.func_timeout(time_out, convert_file, (audio_path,))
             self.completed += 1
@@ -253,6 +255,7 @@ class VideoToAudio:
             self.duplicates_list.append(new_filename)
         except func_timeout.FunctionTimedOut:
             # handle long conversions
+            os.remove(audio_path)#delete started conversion
             self.aborted += 1
             self.aborted_list.append(basename)
         except:
@@ -260,8 +263,9 @@ class VideoToAudio:
             self.failed += 1
             self.failed_list.append(basename)
         finally:
-            self.last_f_skipped = skipped_status
             self.prev_end = time.time()
+            self.last_f_skipped = skipped_status
+
 
     def _convert_files(self, m, window):
         self.file_save_directory = filedialog.askdirectory(
@@ -274,7 +278,7 @@ class VideoToAudio:
         # Bars
         max_iter = len(self.conversion_list)
         render_list = self.conversion_list.copy()
-        self.conversion_start = time.time()
+        t_start = time.time()
         y = 0
         self.convert_btn.configure(
             state=tkinter.DISABLED, text="Converting files...")
@@ -288,12 +292,13 @@ class VideoToAudio:
         time.sleep(1)
         d_window.file_progressbar.start(10)
         self.files_completed_var.set("Initializing conversion engine...")
+        time.sleep(1)
 
-        # change to while for loop
-        while not self.event.is_set() and y < max_iter:
+        # while for loop
+        while not self.event.is_set() and y < max_iter: #todo add instant cancellation on request ,how??
             current = self.conversion_list[y]
             filename = ntpath.basename(current)
-            t = calc_time_left(render_list, y, max_iter, self.conversion_start, self.completed, self.prev_start,
+            t = calc_time_left(render_list, y, max_iter, t_start, self.completed, self.prev_start,
                                self.prev_end,
                                self.last_f_skipped)
             percent = (y / max_iter) * 100
@@ -309,7 +314,7 @@ class VideoToAudio:
                 f"{self.completed} converted, {self.duplicates} duplicates found, {self.failed + self.aborted} aborted\nConverting file {y + 1} of {max_iter}  ")
             self.current_file_var.set(f"Audiofying {filename}...")
             self._render_file_names(render_list, converting=True)
-            self._convert_single_file(current)
+            # self._convert_single_file(current)
             try:
                 d_window.main_progressbar["value"] += (10 / max_iter)
             except:
@@ -320,18 +325,22 @@ class VideoToAudio:
 
         if d_window.main_progress_frame.winfo_exists():
             d_window.main_progress_frame.destroy()
-        self._end_of_conversion()
+        self._end_of_conversion(t_start)
 
-    def _render_file_names(self, list_to_render, converting=False, final=False):
+    def _render_file_names(self, list_to_render, converting=False, final=False, completed=True):
         """renders page content to bottom text box"""
         tag_font = ("Montserrat", 10, "bold")
         text = ""
 
         if final:
+            # completion status
+            canceled = "CONVERSION CANCELLED.\n\n"
+            finished = "CONVERSION COMPLETED.\n\n"
+            # feedback
             dup_info = f"DUPLICATE FILES FOUND - ({self.duplicates})"
             abort_info = f"CONVERSIONS ABORTED/TIMED OUT - ({self.aborted})"
             failed_info = f"CONVERSIONS FAILED - ({self.failed})"
-            top_text = f"{failed_info}, {abort_info}, {dup_info}\n\n"
+            analysis = f"{failed_info}, {abort_info}, {dup_info}\n\n"
             dup_len, abort_len, fail_len, = len(
                 self.duplicates_list), len(self.aborted_list), len(self.failed_list)
             for i in self.duplicates_list:
@@ -341,7 +350,6 @@ class VideoToAudio:
             for i in self.aborted_list:
                 abort_info += f"\n• {i}"
             # render options
-            successful = "ALL FILES WERE SUCCESSFULLY CONVERTED"
             f1 = f"{failed_info}\n\n{abort_info}\n\n{dup_info}"
             f2 = f"{failed_info}\n\n{abort_info}"
             f3 = f"{failed_info}\n\n{dup_info}"
@@ -349,10 +357,13 @@ class VideoToAudio:
             f5 = f"{abort_info}\n\n{dup_info}"
             f6 = f"{abort_info}"
             f7 = f"{dup_info}"
-            if dup_len == fail_len == abort_len == 0:
-                self.textbox_file_text = successful
+            feedback = analysis if not completed else "ALL FILES WERE SUCCESSFULLY CONVERTED"
+            message_title = f'{canceled} {feedback}' if not completed else f'{finished} {feedback}'
+
+            if completed:
+                self.textbox_file_text = message_title
             else:
-                self.textbox_file_text = top_text
+                self.textbox_file_text = message_title
                 if fail_len > 0:
                     if dup_len == 0:
                         if abort_len > 0:
@@ -386,6 +397,9 @@ class VideoToAudio:
             if converting:
                 self.files_textbox.tag_config(
                     "top_highlight", font=tag_font, foreground="orange3")
+            elif completed:
+                self.files_textbox.tag_config(
+                    "top_highlight", font=tag_font, foreground="green")
             else:
                 self.files_textbox.tag_config(
                     "top_highlight", font=tag_font, foreground="red")
