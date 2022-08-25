@@ -2,6 +2,13 @@ import time
 import datetime
 import func_timeout
 from cv2 import cv2
+import subprocess
+import webbrowser
+
+personal_site = "https://github.com/Smtp272"
+
+def open_webpage(e):
+    webbrowser.open_new(personal_site)
 
 def calc_time(func):
     def wrapper(*args, **kwargs):
@@ -10,7 +17,9 @@ def calc_time(func):
         end = time.perf_counter()
         print(f"{func.__name__} took {end - start} seconds")
         return result
+
     return wrapper
+
 
 def convert_time(seconds_to_convert):
     mins, secs = divmod(seconds_to_convert, 60)
@@ -34,17 +43,16 @@ def convert_time(seconds_to_convert):
     else:
         return f"{s_f}"
 
+
 def get_file_duration(video_path):
     def cv_timeout():
         try:
-            video = cv2.VideoCapture(video_path)
-            x = video.get(cv2.CAP_PROP_POS_MSEC)
-            video.release()
-            return 600 if x <= 100 else x
-        except Exception as e:
-            print(type(e), "error at duration")
+            try:
+                return ffprobe_len(video_path)
+            except:
+                return opencv_len(video_path)
+        except:
             return 600
-
     t = 0
     try:
         t = func_timeout.func_timeout(0.5, cv_timeout)
@@ -53,6 +61,21 @@ def get_file_duration(video_path):
     finally:
         return t
 
+
+def opencv_len(file):
+    video = cv2.VideoCapture(file)
+    x = video.get(cv2.CAP_PROP_POS_MSEC)
+    video.release()
+    return 600 if x <= 100 else x
+
+
+def ffprobe_len(file):
+    result = subprocess.run(
+        ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1',
+         file], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    return float(result.stdout)
+
+
 def generate_total_file_time(remaining_list):
     # very inefficient #todo modify this to be workable
     total_file_time = 0
@@ -60,20 +83,21 @@ def generate_total_file_time(remaining_list):
         total_file_time += get_file_duration(i)
     return total_file_time
 
-def calc_time_left(remaining_files, curr_iter,max_iter,t_start,completed,prev_start,prev_end,skipped):
+
+def calc_time_left(remaining_files, curr_iter, max_iter, t_start, completed, prev_start, prev_end, skipped):
     f_time = 0
     t_left = 0
     try:
         if len(remaining_files) > 10:
             raise FileExistsError("Too many files to approximate")
         total = func_timeout.func_timeout(
-            2, generate_total_file_time, args=(remaining_files,))
+            5, generate_total_file_time, args=(remaining_files,))
         t_left = total // 30
         f_time = time.time() + t_left
 
     except (func_timeout.FunctionTimedOut, FileExistsError):
         t_elapsed = time.time() - t_start
-        t_per_file = prev_end-prev_start
+        t_per_file = prev_end - prev_start
 
         if skipped:
             t_per_file = t_elapsed / completed if completed > 0 else 10
