@@ -44,9 +44,6 @@ class VideoToAudio:
         self.duplicates_list = []
         self.failed_list = []
         self.aborted_list = []
-        self.last_f_skipped = False
-        self.prev_end = 0
-        self.prev_start = 0
 
         # Thread man
         self.threads = []
@@ -223,10 +220,7 @@ class VideoToAudio:
         self.files_completed_var.set("")
         self.time_left_label_var.set("")
         self.percentage_text_var.set("")
-        self.last_f_skipped = False
-        self.prev_end = 0
-        self.prev_start = 0
-
+        
     def _convert_single_file(self, video_path):
         def convert_file(path):
             """convert file to mp3"""
@@ -237,8 +231,6 @@ class VideoToAudio:
         basename = ntpath.basename(video_path)
         new_filename = f"{os.path.splitext(basename)[0]}.mp3"
         audio_path = ntpath.join(self.file_save_directory, new_filename)
-        skipped_status = True
-        self.prev_start = time.time()
         try:
             # check if file already exists
             if os.path.exists(audio_path):
@@ -249,22 +241,22 @@ class VideoToAudio:
             time_out = get_file_duration(video_path) // 20
             func_timeout.func_timeout(time_out, convert_file, (audio_path,))
             self.completed += 1
-            skipped_status = False
         except FileExistsError:
             self.duplicates += 1
             self.duplicates_list.append(new_filename)
         except func_timeout.FunctionTimedOut:
             # handle long conversions
-            os.remove(audio_path)#delete started conversion
-            self.aborted += 1
-            self.aborted_list.append(basename)
+            try:
+                os.remove(audio_path)#delete started conversion
+            except:
+                pass
+            finally:
+                self.aborted += 1
+                self.aborted_list.append(basename)
         except:
             # catch all other fails
             self.failed += 1
             self.failed_list.append(basename)
-        finally:
-            self.prev_end = time.time()
-            self.last_f_skipped = skipped_status
 
 
     def _convert_files(self, m, window):
@@ -298,9 +290,7 @@ class VideoToAudio:
         while not self.event.is_set() and y < max_iter: #todo add instant cancellation on request ,how??
             current = self.conversion_list[y]
             filename = ntpath.basename(current)
-            t = calc_time_left(render_list, y, max_iter, t_start, self.completed, self.prev_start,
-                               self.prev_end,
-                               self.last_f_skipped)
+            t = calc_time_left(render_list, y, max_iter, t_start, self.completed)
             percent = (y / max_iter) * 100
             p = f"{int(percent)}%, {max_iter - y} of {max_iter} files remaining"
             time_text = f"{t[0]} left"
@@ -314,7 +304,7 @@ class VideoToAudio:
                 f"{self.completed} converted, {self.duplicates} duplicates found, {self.failed + self.aborted} aborted\nConverting file {y + 1} of {max_iter}  ")
             self.current_file_var.set(f"Audiofying {filename}...")
             self._render_file_names(render_list, converting=True)
-            # self._convert_single_file(current)
+            self._convert_single_file(current)
             try:
                 d_window.main_progressbar["value"] += (10 / max_iter)
             except:
