@@ -84,7 +84,7 @@ def generate_total_file_time(remaining_list):
     return total_file_time
 
 
-def calc_time_left(remaining_files, curr_iter, max_iter, t_start, completed, prev_start, prev_end, skipped):
+def calc_time_left(remaining_files, curr_iter, max_iter, t_start, completed):
     f_time = 0
     t_left = 0
     try:
@@ -97,12 +97,8 @@ def calc_time_left(remaining_files, curr_iter, max_iter, t_start, completed, pre
 
     except (func_timeout.FunctionTimedOut, FileExistsError):
         t_elapsed = time.time() - t_start
-        t_per_file = prev_end - prev_start
-
-        if skipped:
-            t_per_file = t_elapsed / completed if completed > 0 else 10
-
-        t_left = t_per_file * (max_iter - (curr_iter + 1))
+        files_left = (max_iter - (curr_iter + 1))
+        t_left = (t_elapsed/completed * files_left) if completed > 0 else 10 * files_left        
         f_time = time.time() + t_left
 
     finally:
