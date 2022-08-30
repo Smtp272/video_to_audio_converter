@@ -150,7 +150,7 @@ class VideoToAudio:
         self.clear_btn.configure(state=tkinter.NORMAL, text="Clear Selection",
                                  command=lambda: self._manage_btn("clear_selection"))
         time_taken = convert_time(time.time() - t_start)
-        feedback = f"\n{self.completed} files converted.\n{self.duplicates} duplicates found.\n{self.failed + self.aborted} failedf.\n{len(self.conversion_list)} total files.\nTime taken = {time_taken}"
+        feedback = f"\n{self.completed} files converted.\n{self.duplicates} duplicates found.\n{self.failed + self.aborted} failed conversions.\n{len(self.conversion_list)} total files.\nTime taken = {time_taken}"
         if not self.event.is_set():
             messagebox.showinfo("Conversion complete",
                                 f"All Done.\n{feedback}")
@@ -162,6 +162,10 @@ class VideoToAudio:
         self._reset_variables()
 
     def _manage_btn(self, btn):
+        def _clear_selection():
+            self._reset_variables()
+            self._render_file_names([])
+
         if btn == "end_current_conversion":
             self.event.set() if self._cancel_conversion() else None
         elif self.convert_btn.state == tkinter.DISABLED:
@@ -170,12 +174,13 @@ class VideoToAudio:
             return
         else:
             if btn == "select_files":
+                _clear_selection()
                 self._upload_files()
             elif btn == "select_folder":
+                _clear_selection()
                 self._upload_folder()
             elif btn == "clear_selection":
-                self._reset_variables()
-                self._render_file_names([])
+                _clear_selection()
             elif btn == "convert_selection":
                 self._directory_popup()
 
